@@ -1,0 +1,819 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Markdown Printer</title>
+
+  <!-- Fonts & GitHub markdown skin -->
+  <link rel="preconnect" href="https://rsms.me" />
+  <link href="https://rsms.me/inter/inter.css" rel="stylesheet">
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.8.1/github-markdown.min.css" />
+
+  <style>
+    :root{
+      --bg:#f6f8fa; --bg-pane:#fff;           /* light */
+      --txt:#24292e; --border:#d0d7de;
+      --primary:#0969da; --primary-hov:#0754b3;
+      --toast-ok:#1a7f37; --toast-err:#d1242f;
+      --loading-gradient: linear-gradient(90deg, #f6f8fa, #fff, #f6f8fa);
+    }
+    @media (prefers-color-scheme:dark){
+      :root{
+        --bg:#0d1117; --bg-pane:#161b22;      /* dark */
+        --txt:#e6edf3; --border:#30363d;
+        --primary:#3b8eea; --primary-hov:#58a6ff;
+        --toast-ok:#2ea043; --toast-err:#f85149;
+        --loading-gradient: linear-gradient(90deg, #0d1117, #161b22, #0d1117);
+      }
+    }
+    html,body{height:100%;margin:0;font-family:"Inter",system-ui,sans-serif;background:var(--bg);color:var(--txt);}
+    header{
+      padding:0.7rem 1.5rem;
+      font-weight:600;
+      font-size:1.1rem;
+      border-bottom:1px solid var(--border);
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .logo { display: flex; align-items: center; gap: 0.5rem; }
+    .logo svg { width: 24px; height: 24px; }
+    main{height:calc(100% - 3.5rem);display:grid;grid-template-columns:1fr;grid-template-rows:auto 1fr;}
+
+    /* 2-pane grid with splitter (desktop) */
+    @media(min-width:800px){
+      main{grid-template-columns:1fr 6px 1fr;grid-template-rows:1fr;}
+    }
+
+    textarea,#preview{
+      padding:1.1rem;
+      border:none;
+      outline:none;
+      font:15px/1.5 monospace;
+      background:var(--bg-pane);
+      color:inherit;
+    }
+
+    textarea{resize:none;}
+    #preview{overflow:auto;}
+    .splitter{display:none;}
+
+    @media(min-width:800px){
+      .splitter{display:block;width:6px;cursor:col-resize;background:transparent;}
+      .splitter:hover{background:var(--border);}
+    }
+
+    /* command bar */
+    .bar{
+      display:flex;
+      gap:.75rem;
+      align-items:center;
+      position:fixed;
+      bottom:1rem;
+      right:1rem;
+      z-index:100;
+    }
+
+    button{
+      cursor:pointer;
+      padding:.7rem 1.2rem;
+      min-width:92px;
+      font-weight:600;
+      border:1px solid var(--border);
+      border-radius:8px;
+      background:var(--bg-pane);
+      color:inherit;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .primary{background:var(--primary);color:#fff;border:none;}
+    .primary:hover{background:var(--primary-hov);}
+    button:disabled{opacity:.4;cursor:not-allowed}
+    button:focus-visible{outline:3px solid #ffbe3d;outline-offset:2px;}
+
+    /* toast */
+    .toast{
+      position:fixed;
+      bottom:5rem;
+      left:50%;
+      transform:translateX(-50%);
+      padding:.45rem 1.1rem;
+      border-radius:6px;
+      color:#fff;
+      font-size:.87rem;
+      box-shadow:0 2px 6px rgba(0,0,0,.2);
+      z-index:150;
+    }
+
+    /* toolbar */
+    .toolbar {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-pane);
+      flex-wrap: wrap;
+    }
+
+    .tool-btn {
+      cursor: pointer;
+      padding: 0.4rem 0.6rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg-pane);
+      color: inherit;
+      font-size: 0.85rem;
+    }
+
+    .tool-btn:hover {
+      background: var(--bg);
+    }
+
+    /* File handling */
+    .file-input {
+      display: none;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+
+    .modal {
+      background: var(--bg-pane);
+      border-radius: 8px;
+      padding: 1.5rem;
+      width: 90%;
+      max-width: 500px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+
+    .modal h2 {
+      margin-top: 0;
+    }
+
+    .modal input {
+      width: 100%;
+      padding: 0.5rem;
+      margin: 0.5rem 0 1rem;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: var(--bg);
+      color: inherit;
+    }
+
+    .modal-buttons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    /* Print template customization */
+    .template-selector {
+      margin-bottom: 1rem;
+    }
+
+    /* Loading state */
+    .loading {
+      position: relative;
+    }
+
+    .loading::after {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: var(--loading-gradient);
+      background-size: 200% 100%;
+      animation: loading 1.5s infinite;
+    }
+
+    @keyframes loading {
+      0% { background-position: 100% 0; }
+      100% { background-position: -100% 0; }
+    }
+
+    /* PDF previewer */
+    .pdf-container {
+      width: 100%;
+      height: 100%;
+      overflow: auto;
+      padding: 1rem;
+    }
+
+    /* Word count */
+    .word-count {
+      font-size: 0.8rem;
+      opacity: 0.7;
+      margin-left: auto;
+      padding-right: 0.5rem;
+    }
+
+    /* Keyboard shortcuts help */
+    .shortcuts-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .shortcuts-list li {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .kbd {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.4rem;
+      font-family: monospace;
+      font-size: 0.9rem;
+    }
+
+    /* Help icon */
+    .help-icon {
+      cursor: pointer;
+      opacity: 0.7;
+    }
+
+    .help-icon:hover {
+      opacity: 1;
+    }
+
+    /* Templates */
+    .template-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    .template-item {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .template-item:hover {
+      background: var(--bg);
+    }
+
+    .template-item.selected {
+      border-color: var(--primary);
+      background: rgba(9, 105, 218, 0.1);
+    }
+  </style>
+
+  <!-- Prettier & Marked -->
+  <script src="https://unpkg.com/prettier@3.5.3/standalone.js"></script>
+  <script src="https://unpkg.com/prettier@3.5.3/parser-markdown.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.7/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+</head>
+
+<body>
+  <header>
+    <div class="logo">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 6h16M4 12h16M4 18h12"></path>
+      </svg>
+      <span>Markdown Printer</span>
+    </div>
+    <div class="help-icon" id="helpBtn" title="Keyboard Shortcuts">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+    </div>
+  </header>
+
+  <div class="toolbar" id="toolbar">
+    <button class="tool-btn" id="fileOpenBtn" title="Open Markdown File">Open</button>
+    <button class="tool-btn" id="saveBtn" title="Save Markdown">Save</button>
+    <button class="tool-btn" id="exportPdfBtn" title="Export as PDF">PDF</button>
+    <button class="tool-btn" id="templateBtn" title="Choose Template">Template</button>
+    <span class="word-count" id="wordCount">0 words</span>
+  </div>
+  <input type="file" id="fileInput" class="file-input" accept=".md,.markdown,.txt">
+
+  <main>
+    <textarea id="editor" spellcheck="false">
+# Welcome to Markdown Printer 👋
+
+*Edit your markdown* on the left, and see the *live preview* on the right.
+
+## Features
+
+- **Live Preview** of your markdown as you type
+- **Beautify** your markdown formatting with one click
+- **Print or Save as PDF** for sharing
+- **Customizable Templates** for different document types
+- **File Import/Export** to work with your files
+- **Word Count** to track your progress
+
+## Keyboard Shortcuts
+
+- `Ctrl/⌘ + B` - Beautify markdown
+- `Ctrl/⌘ + S` - Save markdown
+- `Ctrl/⌘ + O` - Open file
+- `Ctrl/⌘ + P` - Print/PDF
+- `Ctrl/⌘ + Shift + L` - Toggle light/dark mode
+    </textarea>
+
+    <div class="splitter" id="splitter"></div>
+
+    <section id="preview" class="markdown-body"></section>
+  </main>
+
+  <!-- We've removed the bottom command bar as it's redundant with the toolbar -->
+
+  <!-- Modal template -->
+  <div id="modal" style="display: none;"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const editor = $('editor'), preview = $('preview');
+    const fileInput = $('fileInput'), fileOpenBtn = $('fileOpenBtn');
+    const saveBtn = $('saveBtn'), exportPdfBtn = $('exportPdfBtn');
+    const wordCount = $('wordCount'), templateBtn = $('templateBtn');
+    const helpBtn = $('helpBtn'), modal = $('modal');
+
+    /* ---------- Templates ---------- */
+    const templates = {
+      default: {
+        name: "Default",
+        css: `body { max-width: 800px; margin: 0 auto; padding: 2rem; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif; }
+        h1, h2, h3 { margin-top: 1.5em; margin-bottom: 0.5em; }
+        p, ul, ol { margin-bottom: 1.5em; line-height: 1.6; }`
+      },
+      academic: {
+        name: "Academic Paper",
+        css: `body { max-width: 800px; margin: 0 auto; padding: 2rem; font-family: Times New Roman, serif; font-size: 12pt; line-height: 2; }
+        h1 { text-align: center; font-size: 16pt; font-weight: bold; }
+        h2 { font-size: 14pt; font-weight: bold; }
+        p { text-indent: 2em; margin-bottom: 0; }
+        .abstract { font-style: italic; margin: 2em 4em; }`
+      },
+      memo: {
+        name: "Business Memo",
+        css: `body { max-width: 800px; margin: 0 auto; padding: 2rem; font-family: Arial, sans-serif; font-size: 11pt; }
+        h1 { text-align: center; text-transform: uppercase; letter-spacing: 2px; }
+        .memo-header { display: grid; grid-template-columns: 1fr 1fr; margin-bottom: 2rem; }
+        .memo-header p { margin: 0.5em 0; }
+        h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.3em; }`
+      },
+      blog: {
+        name: "Blog Post",
+        css: `body { max-width: 700px; margin: 0 auto; padding: 2rem; font-family: Georgia, serif; font-size: 18px; line-height: 1.8; }
+        h1 { font-size: 2.5em; margin-bottom: 0.3em; }
+        h2 { font-size: 1.8em; margin-top: 1.5em; }
+        p { margin-bottom: 1.5em; }
+        blockquote { border-left: 4px solid #ddd; padding-left: 1em; font-style: italic; }`
+      }
+    };
+
+    let currentTemplate = 'default';
+
+    /* ---------- live preview ---------- */
+    function render(md) {
+      preview.innerHTML = marked.parse(md);
+      updateWordCount(md);
+
+      // Apply current template styles to preview
+      applyTemplateToPreview();
+    }
+
+    function applyTemplateToPreview() {
+      // Remove any existing template styles
+      const existingStyle = document.getElementById('preview-style');
+      if (existingStyle) existingStyle.remove();
+
+      // Create and append new style for the current template
+      const template = templates[currentTemplate];
+      const style = document.createElement('style');
+      style.id = 'preview-style';
+      style.textContent = `
+        #preview {
+          ${template.css}
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    render(editor.value);
+
+    editor.addEventListener('input', () => {
+      render(editor.value);
+    });
+
+    /* ---------- Toast ---------- */
+    function toast(msg, ok) {
+      const t = document.createElement('div');
+      t.textContent = msg;
+      t.className = 'toast';
+      t.style.background = ok ? 'var(--toast-ok)' : 'var(--toast-err)';
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 1800);
+    }
+
+    /* ---------- Keyboard Shortcuts ---------- */
+    addEventListener('keydown', (e) => {
+      // Print: Ctrl/Cmd + P
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        exportPdfBtn.click();
+      }
+
+      // Save: Ctrl/Cmd + S
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveBtn.click();
+      }
+
+      // Open: Ctrl/Cmd + O
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'o') {
+        e.preventDefault();
+        fileOpenBtn.click();
+      }
+
+    });
+
+    /* ---------- Click outside modal to close ---------- */
+    window.addEventListener('click', (e) => {
+      if (e.target.classList.contains('modal-overlay')) {
+        modal.style.display = 'none';
+      }
+    });
+
+    /* ---------- Escape key to close modal ---------- */
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && modal.style.display === 'block') {
+        modal.style.display = 'none';
+      }
+    });
+
+    /* ---------- Initialize ---------- */
+    // Set initial word count
+    updateWordCount(editor.value);
+
+    // Apply the default template to preview
+    applyTemplateToPreview();
+
+    // Focus editor on start
+    editor.focus();
+
+    /* ---------- Word Count ---------- */
+    function updateWordCount(text) {
+      // Remove code blocks, HTML tags, and markdown syntax
+      const cleanText = text
+          .replace(/```[\s\S]*?```/g, '') // Remove code blocks
+          .replace(/`[^`]*`/g, '')  // Remove inline code
+          .replace(/<[^>]*>/g, '')  // Remove HTML tags
+          .replace(/\[.*?\]\(.*?\)/g, '$1') // Replace links with just text
+          .replace(/[*_~#]/g, '');  // Remove markdown syntax
+
+      const words = cleanText.split(/\s+/).filter(word => word.length > 0);
+      wordCount.textContent = `${words.length} words`;
+    }
+
+    /* ---------- Print ---------- */
+    exportPdfBtn.onclick = () => {
+      showPrintModal();
+    };
+
+    function showPrintModal() {
+      const modalContent = `
+        <div class="modal-overlay">
+          <div class="modal">
+            <h2>Print Options</h2>
+            <div class="template-selector">
+              <label for="print-template">Choose template:</label>
+              <select id="print-template">
+                ${Object.entries(templates).map(([key, template]) =>
+                  `<option value="${key}" ${key === currentTemplate ? 'selected' : ''}>${template.name}</option>`
+                ).join('')}
+              </select>
+            </div>
+            <div>
+              <label for="print-title">Document title:</label>
+              <input type="text" id="print-title" placeholder="My Document" value="Markdown Document">
+            </div>
+            <div class="modal-buttons">
+              <button id="cancel-print">Cancel</button>
+              <button id="confirm-print" class="primary">Print</button>
+              <button id="save-pdf" class="primary">Save as PDF</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      modal.innerHTML = modalContent;
+      modal.style.display = 'block';
+
+      $('cancel-print').onclick = () => {
+        modal.style.display = 'none';
+      };
+
+      $('confirm-print').onclick = () => {
+        const templateKey = $('print-template').value;
+        const title = $('print-title').value || 'Markdown Document';
+
+        printDocument(templateKey, title, false);
+        modal.style.display = 'none';
+      };
+
+      $('save-pdf').onclick = () => {
+        const templateKey = $('print-template').value;
+        const title = $('print-title').value || 'Markdown Document';
+
+        printDocument(templateKey, title, true);
+        modal.style.display = 'none';
+      };
+    }
+
+    function printDocument(templateKey, title, saveAsPdf) {
+      const template = templates[templateKey] || templates.default;
+
+      const w = window.open('', '', 'noopener,noreferrer');
+      w.document.write(`<!doctype html><html><head>
+        <meta charset="utf-8">
+        <title>${title}</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.8.1/github-markdown.min.css">
+        <style>
+          @media print {
+            body { margin: 0; }
+            @page { margin: 1.5cm; }
+          }
+          ${template.css}
+        </style>
+      </head>
+      <body class="markdown-body">${preview.innerHTML}</body></html>`);
+
+      w.document.close();
+
+      if (saveAsPdf) {
+        // Wait for content to render
+        setTimeout(() => {
+          const element = w.document.body;
+          const opt = {
+            margin: [10, 10, 10, 10],
+            filename: `${title.replace(/\s+/g, '_')}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+          };
+
+          html2pdf().set(opt).from(element).save().then(() => {
+            setTimeout(() => w.close(), 1000);
+          });
+        }, 500);
+      } else {
+        w.focus();
+        w.print();
+      }
+    }
+
+    /* ---------- Template Manager ---------- */
+    templateBtn.onclick = () => {
+      showTemplateModal();
+    };
+
+    function showTemplateModal() {
+      const modalContent = `
+        <div class="modal-overlay">
+          <div class="modal">
+            <h2>Choose Template</h2>
+            <p>Select a template for printing and PDF export:</p>
+            <div class="template-list">
+              ${Object.entries(templates).map(([key, template]) => `
+                <div class="template-item ${key === currentTemplate ? 'selected' : ''}" data-template="${key}">
+                  <strong>${template.name}</strong>
+                </div>
+              `).join('')}
+            </div>
+            <div class="modal-buttons">
+              <button id="cancel-template">Cancel</button>
+              <button id="confirm-template" class="primary">Apply Template</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      modal.innerHTML = modalContent;
+      modal.style.display = 'block';
+
+      // Add click event to template items
+      document.querySelectorAll('.template-item').forEach(item => {
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.template-item').forEach(el => el.classList.remove('selected'));
+          item.classList.add('selected');
+        });
+      });
+
+      $('cancel-template').onclick = () => {
+        modal.style.display = 'none';
+      };
+
+      $('confirm-template').onclick = () => {
+        const selected = document.querySelector('.template-item.selected');
+        if (selected) {
+          currentTemplate = selected.dataset.template;
+          toast(`Template changed to ${templates[currentTemplate].name}`, true);
+
+          // Apply the selected template to the preview
+          applyTemplateToPreview();
+        }
+        modal.style.display = 'none';
+      };
+    }
+
+    /* ---------- File Handling ---------- */
+    fileOpenBtn.onclick = () => {
+      fileInput.click();
+    };
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        editor.value = e.target.result;
+        render(editor.value);
+        toast(`Loaded "${file.name}"`, true);
+      };
+      reader.readAsText(file);
+    });
+
+    saveBtn.onclick = () => {
+      const filename = prompt('Enter filename:', 'document.md');
+
+      // If user cancels or enters empty filename, don't proceed
+      if (!filename) {
+        return;
+      }
+
+      const blob = new Blob([editor.value], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      toast(`Saved as "${filename}"`, true);
+    };
+
+    exportPdfBtn.onclick = () => {
+      const filename = prompt('Enter filename:', 'document.pdf');
+
+      // If user cancels or enters empty filename, don't proceed
+      if (!filename) {
+        return;
+      }
+
+      const element = preview;
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      toast('Generating PDF...', true);
+
+      html2pdf().set(opt).from(element).save().then(() => {
+        toast('PDF saved!', true);
+      }).catch(err => {
+        console.error(err);
+        toast('PDF export failed', false);
+      });
+    };
+
+    /* ---------- Help Modal ---------- */
+    helpBtn.onclick = () => {
+      showHelpModal();
+    };
+
+    function showHelpModal() {
+      const modalContent = `
+        <div class="modal-overlay">
+          <div class="modal">
+            <h2>Keyboard Shortcuts</h2>
+            <ul class="shortcuts-list">
+              <li><span>Beautify Markdown</span> <span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>B</kbd></span></li>
+              <li><span>Save Markdown</span> <span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>S</kbd></span></li>
+              <li><span>Open File</span> <span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>O</kbd></span></li>
+              <li><span>Print/Export PDF</span> <span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>P</kbd></span></li>
+              <li><span>Toggle Dark Mode</span> <span><kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd></span></li>
+            </ul>
+            <div class="modal-buttons">
+              <button id="close-help" class="primary">Close</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      modal.innerHTML = modalContent;
+      modal.style.display = 'block';
+
+      $('close-help').onclick = () => {
+        modal.style.display = 'none';
+      };
+    }
+
+    /* ---------- Draggable Splitter ---------- */
+    (function initDraggableSplitter() {
+      const main = document.querySelector('main');
+      const splitter = $('splitter');
+      let isResizing = false;
+      let startX;
+      let startWidth;
+
+      // Minimum width for editor and preview (in pixels)
+      const MIN_WIDTH = 200;
+
+      // Handle mouse down on the splitter
+      splitter.addEventListener('mousedown', (e) => {
+        isResizing = true;
+        startX = e.clientX;
+
+        // Get the initial width of the editor
+        startWidth = editor.getBoundingClientRect().width;
+
+        // Prevent text selection while dragging
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'col-resize';
+      });
+
+      // Handle mouse move
+      document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+
+        // Calculate how far the mouse has moved
+        const diffX = e.clientX - startX;
+
+        // Calculate new width as a percentage of the container
+        const mainWidth = main.getBoundingClientRect().width;
+        const newEditorWidth = startWidth + diffX;
+        const newPreviewWidth = mainWidth - newEditorWidth - splitter.offsetWidth;
+
+        // Don't allow panes to be too small
+        if (newEditorWidth < MIN_WIDTH || newPreviewWidth < MIN_WIDTH) return;
+
+        // Convert to percentage for responsive layout
+        const editorPercent = (newEditorWidth / mainWidth) * 100;
+        const previewPercent = (newPreviewWidth / mainWidth) * 100;
+        const splitterPercent = (splitter.offsetWidth / mainWidth) * 100;
+
+        // Update the grid template
+        main.style.gridTemplateColumns = `${editorPercent}% ${splitterPercent}% ${previewPercent}%`;
+      });
+
+      // Handle mouse up - stop resizing
+      document.addEventListener('mouseup', () => {
+        if (isResizing) {
+          isResizing = false;
+          document.body.style.userSelect = '';
+          document.body.style.cursor = '';
+        }
+      });
+
+      // Also stop resizing if mouse leaves the window
+      document.addEventListener('mouseleave', () => {
+        if (isResizing) {
+          isResizing = false;
+          document.body.style.userSelect = '';
+          document.body.style.cursor = '';
+        }
+      });
+    })();
+
+  </script>
+</body>
+</html>
